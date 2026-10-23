@@ -65,3 +65,11 @@ The system is expected to help households understand where their money goes, ide
 ## Technologies
 
 The technology stack will be finalized during the planning phase based on project requirements.
+
+## Project Status
+
+- [x] Project idea finalized
+- [x] Problem statement documented
+- [x] Initial project plan prepared
+- [ ] Application development
+- [ ] Testing and final demonstration
