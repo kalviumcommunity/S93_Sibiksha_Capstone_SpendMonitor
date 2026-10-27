@@ -68,12 +68,6 @@ The technology stack will be finalized during the planning phase based on projec
 
 ## Project Status
 
-- [x] Project idea finalized
-- [x] Problem statement documented
-- [x] Initial project plan prepared
-- [ ] Application development
-- [ ] Testing and final demonstration
-
 ## GET API Implementation
 
 SpendMonitor provides a GET API to retrieve expense records from MongoDB.
@@ -115,3 +109,33 @@ The endpoint was tested using a browser. A successful request returns a JSON res
 - `data`: List of saved expenses.
 
 **Test URL:** `http://localhost:5000/api/expenses`
+
+## POST API Implementation
+
+The SpendMonitor project provides a POST API to create and save new expense records in MongoDB.
+
+### Endpoint
+- **Method:** POST
+- **URL:** `/api/expenses`
+- **Purpose:** Add a new expense to the database.
+
+### Request Body
+```json
+{
+  "title": "Internet Bill",
+  "amount": 899,
+  "category": "Utilities",
+  "description": "Monthly internet bill"
+}
+```
+
+### Implementation
+The API uses Express.js to receive expense details and Mongoose to save them in MongoDB.
+
+### Response
+- **Status Code:** `201 Created`
+- `success`: Indicates whether the request succeeded.
+- `data`: Contains the newly created expense.
+
+### Testing
+The POST endpoint was tested using Postman. A successful request returned the created expense as a JSON response.
