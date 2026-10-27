@@ -3,7 +3,9 @@ require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+
 const Expense = require("./models/Expense.js");
+const User = require("./models/User.js");
 
 const app = express();
 
@@ -15,10 +17,78 @@ app.get("/", (req, res) => {
   res.json({ message: "SpendMonitor API is running" });
 });
 
-// WRITE: Create a new expense
+// CREATE: Create a new user
+app.post("/api/users", async (req, res) => {
+  try {
+    const { name, email } = req.body;
+
+    const user = await User.create({ name, email });
+
+    res.status(201).json({
+      success: true,
+      data: user,
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+
+
+// READ: Get all expenses
+app.get("/api/expenses", async (req, res) => {
+  try {
+    const expenses = await Expense.find()
+      .populate("user", "name email")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: expenses.length,
+      data: expenses,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// CREATE: Create a new expense linked to a user
 app.post("/api/expenses", async (req, res) => {
   try {
-    const expense = await Expense.create(req.body);
+    const { title, amount, category, date, description, user } = req.body;
+
+    // Check whether a user ID was provided
+    if (!user || !mongoose.Types.ObjectId.isValid(user)) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid user ID is required",
+      });
+    }
+
+    // Check whether the user exists
+    const existingUser = await User.findById(user);
+
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const expense = await Expense.create({
+      title,
+      amount,
+      category,
+      date,
+      description,
+      user,
+    });
 
     res.status(201).json({
       success: true,
@@ -32,13 +102,37 @@ app.post("/api/expenses", async (req, res) => {
   }
 });
 
-// READ: Get all expenses
-app.get("/api/expenses", async (req, res) => {
+// READ: Get expenses belonging to a specific user
+app.get("/api/users/:userId/expenses", async (req, res) => {
   try {
-    const expenses = await Expense.find().sort({ createdAt: -1 });
+    const { userId } = req.params;
 
-    res.json({
+    // Validate the user ID
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user ID",
+      });
+    }
+
+    // Find the user
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Retrieve expenses linked to this user
+    const expenses = await Expense.find({ user: userId })
+      .populate("user", "name email")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
       success: true,
+      user: user,
       count: expenses.length,
       data: expenses,
     });
@@ -50,11 +144,9 @@ app.get("/api/expenses", async (req, res) => {
   }
 });
 
-
-// GET: Retrieve a single expense by ID
+// READ: Get a single expense by ID
 app.get("/api/expenses/:id", async (req, res) => {
   try {
-    // Check whether the provided ID is valid
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
         success: false,
@@ -62,10 +154,9 @@ app.get("/api/expenses/:id", async (req, res) => {
       });
     }
 
-    // Find the expense using its ID
-    const expense = await Expense.findById(req.params.id);
+    const expense = await Expense.findById(req.params.id)
+      .populate("user", "name email");
 
-    // Return 404 if the expense does not exist
     if (!expense) {
       return res.status(404).json({
         success: false,
@@ -73,8 +164,7 @@ app.get("/api/expenses/:id", async (req, res) => {
       });
     }
 
-    // Return the expense if found
-    res.json({
+    res.status(200).json({
       success: true,
       data: expense,
     });
@@ -86,12 +176,9 @@ app.get("/api/expenses/:id", async (req, res) => {
   }
 });
 
-
-
-// PUT: Update an existing expense by ID
+// UPDATE: Update an expense by ID
 app.put("/api/expenses/:id", async (req, res) => {
   try {
-    // Check whether the provided ID is valid
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
         success: false,
@@ -99,7 +186,6 @@ app.put("/api/expenses/:id", async (req, res) => {
       });
     }
 
-    // Find the expense and update its details
     const expense = await Expense.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -107,9 +193,8 @@ app.put("/api/expenses/:id", async (req, res) => {
         new: true,
         runValidators: true,
       }
-    );
+    ).populate("user", "name email");
 
-    // Return 404 if the expense does not exist
     if (!expense) {
       return res.status(404).json({
         success: false,
@@ -117,7 +202,6 @@ app.put("/api/expenses/:id", async (req, res) => {
       });
     }
 
-    // Return the updated expense
     res.status(200).json({
       success: true,
       data: expense,
@@ -130,10 +214,9 @@ app.put("/api/expenses/:id", async (req, res) => {
   }
 });
 
-// DELETE: Remove an expense by ID
+// DELETE: Delete an expense by ID
 app.delete("/api/expenses/:id", async (req, res) => {
   try {
-    // Check whether the ID is valid
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
         success: false,
@@ -141,10 +224,8 @@ app.delete("/api/expenses/:id", async (req, res) => {
       });
     }
 
-    // Find and delete the expense
     const expense = await Expense.findByIdAndDelete(req.params.id);
 
-    // Return an error if the expense does not exist
     if (!expense) {
       return res.status(404).json({
         success: false,
@@ -152,7 +233,6 @@ app.delete("/api/expenses/:id", async (req, res) => {
       });
     }
 
-    // Send a success response
     res.status(200).json({
       success: true,
       message: "Expense deleted successfully",
@@ -165,7 +245,6 @@ app.delete("/api/expenses/:id", async (req, res) => {
     });
   }
 });
-
 
 // Connect to MongoDB before starting the server
 mongoose
@@ -180,4 +259,3 @@ mongoose
   .catch((error) => {
     console.error("MongoDB connection failed:", error.message);
   });
-  
