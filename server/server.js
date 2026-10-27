@@ -50,6 +50,43 @@ app.get("/api/expenses", async (req, res) => {
   }
 });
 
+
+// GET: Retrieve a single expense by ID
+app.get("/api/expenses/:id", async (req, res) => {
+  try {
+    // Check whether the provided ID is valid
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expense ID",
+      });
+    }
+
+    // Find the expense using its ID
+    const expense = await Expense.findById(req.params.id);
+
+    // Return 404 if the expense does not exist
+    if (!expense) {
+      return res.status(404).json({
+        success: false,
+        message: "Expense not found",
+      });
+    }
+
+    // Return the expense if found
+    res.json({
+      success: true,
+      data: expense,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+
 // Connect to MongoDB before starting the server
 mongoose
   .connect(process.env.MONGODB_URI)

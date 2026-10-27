@@ -29,7 +29,7 @@ Families often struggle to manage their monthly budgets because small and freque
 
 **Figma Link:** https://www.figma.com/proto/neUXwpcDutF862vkarNttS/SpendWise---Mock-UX-Design?node-id=1-3&p=f&t=my4Wc4lrSjmAqGAY-0&scaling=min-zoom&content-scaling=fixed&page-id=0%3A1
 
-## Day-by-Day Capstone Plan
+s## Day-by-Day Capstone Plan
 
 **Day 1:** Define the problem statement, project objectives, target users, and requirements.
 
@@ -73,3 +73,45 @@ The technology stack will be finalized during the planning phase based on projec
 - [x] Initial project plan prepared
 - [ ] Application development
 - [ ] Testing and final demonstration
+
+## GET API Implementation
+
+SpendMonitor provides a GET API to retrieve expense records from MongoDB.
+
+### Endpoint
+
+- **Method:** GET
+- **URL:** `/api/expenses`
+- **Purpose:** Retrieve all saved expenses from the database.
+
+### Implementation
+
+The API uses Express.js to handle the GET request and Mongoose to fetch expense records from MongoDB.
+
+```javascript
+app.get("/api/expenses", async (req, res) => {
+  try {
+    const expenses = await Expense.find().sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      count: expenses.length,
+      data: expenses,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+```
+
+### Testing
+
+The endpoint was tested using a browser. A successful request returns a JSON response containing:
+- `success`: Indicates whether the request succeeded.
+- `count`: Number of expense records retrieved.
+- `data`: List of saved expenses.
+
+**Test URL:** `http://localhost:5000/api/expenses`
