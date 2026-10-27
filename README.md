@@ -139,3 +139,35 @@ The API uses Express.js to receive expense details and Mongoose to save them in 
 
 ### Testing
 The POST endpoint was tested using Postman. A successful request returned the created expense as a JSON response.
+
+## PUT API Implementation
+
+The SpendMonitor project provides a PUT API to update existing expense records in MongoDB.
+
+### Endpoint
+- **Method:** PUT
+- **URL:** `/api/expenses/:id`
+- **Purpose:** Update an existing expense using its ID.
+
+### Request Body
+```json
+{
+  "title": "Updated Internet Bill",
+  "amount": 999,
+  "category": "Utilities",
+  "description": "Updated monthly internet bill"
+}
+```
+
+### Implementation
+The API uses Express.js to handle PUT requests and Mongoose to find and update the expense in MongoDB.
+
+### Response
+- **Status Code:** `200 OK` when the expense is updated successfully.
+- `success`: Indicates whether the request succeeded.
+- `data`: Contains the updated expense.
+
+The API returns `400 Bad Request` for an invalid ID or validation error, and `404 Not Found` if the expense does not exist.
+
+### Testing
+The PUT endpoint was tested using Postman. The successful response confirmed that the expense details were updated.
