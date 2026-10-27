@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState } from "react"; 
 
 const API_URL = "http://localhost:5000/api/expenses";
 
@@ -13,9 +13,12 @@ function ExpenseList() {
   const [saving, setSaving] = useState(false);
 
   // Fetch expenses from the backend
-  async function fetchExpenses() {
+  
+useEffect(() => {
+  let ignore = false;
+
+  async function loadExpenses() {
     try {
-      setLoading(true);
       setError("");
 
       const response = await fetch(API_URL);
@@ -25,17 +28,27 @@ function ExpenseList() {
         throw new Error(result.message || "Failed to fetch expenses");
       }
 
-      setExpenses(result.data);
+      if (!ignore) {
+        setExpenses(result.data);
+      }
     } catch (err) {
-      setError(err.message || "Unable to connect to the server.");
+      if (!ignore) {
+        setError(err.message || "Unable to connect to the server.");
+      }
     } finally {
-      setLoading(false);
+      if (!ignore) {
+        setLoading(false);
+      }
     }
   }
 
-  useEffect(() => {
-    fetchExpenses();
-  }, []);
+  loadExpenses();
+
+  return () => {
+    ignore = true;
+  };
+}, []);
+
 
   // Start editing an expense
   function handleEdit(expense) {
