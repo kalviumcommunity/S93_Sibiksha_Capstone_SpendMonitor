@@ -130,6 +130,42 @@ app.put("/api/expenses/:id", async (req, res) => {
   }
 });
 
+// DELETE: Remove an expense by ID
+app.delete("/api/expenses/:id", async (req, res) => {
+  try {
+    // Check whether the ID is valid
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expense ID",
+      });
+    }
+
+    // Find and delete the expense
+    const expense = await Expense.findByIdAndDelete(req.params.id);
+
+    // Return an error if the expense does not exist
+    if (!expense) {
+      return res.status(404).json({
+        success: false,
+        message: "Expense not found",
+      });
+    }
+
+    // Send a success response
+    res.status(200).json({
+      success: true,
+      message: "Expense deleted successfully",
+      data: expense,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 
 // Connect to MongoDB before starting the server
 mongoose
