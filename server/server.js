@@ -1,3 +1,4 @@
+
 require("dotenv").config();
 
 const express = require("express");
@@ -5,15 +6,17 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const Expense = require("./models/Expense.js");
+
 const User = require("./models/User.js");
+const Expense = require("./models/Expense.js");
 
 const app = express();
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Test route
+// Test routes
 app.get("/", (req, res) => {
   res.json({ message: "SpendMonitor API is running" });
 });
@@ -22,28 +25,58 @@ app.get("/api/test", (req, res) => {
   res.json({ message: "Correct SpendMonitor server is running" });
 });
 
-// REGISTER: Create a new user with a hashed password
+// JWT Authentication Middleware
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({
+      success: false,
+      message: "Access denied. Token is required.",
+    });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  if (!process.env.JWT_SECRET) {
+    return res.status(500).json({
+      success: false,
+      message: "Authentication is not configured.",
+    });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET, (error, decoded) => {
+    if (error) {
+      return res.status(403).json({
+        success: false,
+        message: "Invalid or expired token.",
+      });
+    }
+
+    req.user = decoded;
+    next();
+  });
+}
+
+// REGISTER
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { name, username, email, password } = req.body;
 
-    // Check required fields
     if (!name || !username || !email || !password) {
       return res.status(400).json({
         success: false,
-        message: "Name, username, email, and password are required",
+        message: "Name, username, email, and password are required.",
       });
     }
 
-    // Validate password length
     if (password.length < 8) {
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 8 characters long",
+        message: "Password must be at least 8 characters long.",
       });
     }
 
-    // Check whether the username or email already exists
     const existingUser = await User.findOne({
       $or: [
         { username: username.trim().toLowerCase() },
@@ -54,11 +87,10 @@ app.post("/api/auth/register", async (req, res) => {
     if (existingUser) {
       return res.status(409).json({
         success: false,
-        message: "Username or email already exists",
+        message: "Username or email already exists.",
       });
     }
 
-    // Hash the password before saving
     const hashedPassword = await bcrypt.hash(password, 12);
 
     const user = await User.create({
@@ -68,10 +100,9 @@ app.post("/api/auth/register", async (req, res) => {
       password: hashedPassword,
     });
 
-    // Do not return the password
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
-      message: "Registration successful",
+      message: "Registration successful.",
       data: {
         id: user._id,
         name: user.name,
@@ -80,85 +111,73 @@ app.post("/api/auth/register", async (req, res) => {
       },
     });
   } catch (error) {
-    // Handle duplicate username/email database errors
+    console.error("Registration error:", error.message);
+
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: "Username or email already exists",
+        message: "Username or email already exists.",
       });
     }
 
-    console.error("Registration error:", error.message);
-
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Registration failed",
+      message: "Registration failed.",
     });
   }
 });
 
-
-
-// LOGIN: Authenticate user with username and password
+// LOGIN
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { username, password } = req.body;
 
-    // Check required fields
     if (!username || !password) {
       return res.status(400).json({
         success: false,
-        message: "Username and password are required",
+        message: "Username and password are required.",
       });
     }
 
-    // Find user by username and include the hidden password field
     const user = await User.findOne({
       username: username.trim().toLowerCase(),
     }).select("+password");
 
-    // Use the same message for unknown usernames and incorrect passwords
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: "Invalid username or password",
+        message: "Invalid username or password.",
       });
     }
 
-    // Compare the entered password with the stored hash
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    const isPasswordValid = await bcrypt.compare(
+      password,
+      user.password
+    );
 
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
-        message: "Invalid username or password",
+        message: "Invalid username or password.",
       });
     }
 
-    // Ensure JWT_SECRET is configured
     if (!process.env.JWT_SECRET) {
-      console.error("JWT_SECRET is missing from environment variables");
-
       return res.status(500).json({
         success: false,
-        message: "Authentication is not configured",
+        message: "Authentication is not configured.",
       });
     }
 
-    // Generate an authentication token
     const token = jwt.sign(
-      {
-        userId: user._id.toString(),
-      },
+      { userId: user._id.toString() },
       process.env.JWT_SECRET,
-      {
-        expiresIn: "1h",
-      }
+      { expiresIn: "1h" }
     );
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: "Login successful",
+      message: "Login successful.",
       token,
       data: {
         id: user._id,
@@ -170,58 +189,43 @@ app.post("/api/auth/login", async (req, res) => {
   } catch (error) {
     console.error("Login error:", error.message);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Login failed",
+      message: "Login failed.",
     });
   }
 });
 
+// Protect all expense routes
+app.use("/api/expenses", authenticateToken);
+app.use("/api/users/:userId/expenses", authenticateToken);
 
-
-
-// READ: Get all expenses
+// GET ALL EXPENSES OF LOGGED-IN USER
 app.get("/api/expenses", async (req, res) => {
   try {
-    const expenses = await Expense.find()
+    const expenses = await Expense.find({
+      user: req.user.userId,
+    })
       .populate("user", "name email")
       .sort({ createdAt: -1 });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: expenses.length,
       data: expenses,
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 });
 
-// CREATE: Create a new expense linked to a user
+// CREATE EXPENSE
 app.post("/api/expenses", async (req, res) => {
   try {
-    const { title, amount, category, date, description, user } = req.body;
-
-    // Check whether a user ID was provided
-    if (!user || !mongoose.Types.ObjectId.isValid(user)) {
-      return res.status(400).json({
-        success: false,
-        message: "A valid user ID is required",
-      });
-    }
-
-    // Check whether the user exists
-    const existingUser = await User.findById(user);
-
-    if (!existingUser) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
+    const { title, amount, category, date, description } = req.body;
 
     const expense = await Expense.create({
       title,
@@ -229,108 +233,124 @@ app.post("/api/expenses", async (req, res) => {
       category,
       date,
       description,
-      user,
+      user: req.user.userId,
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
+      message: "Expense created successfully.",
       data: expense,
     });
   } catch (error) {
-    res.status(400).json({
+    return res.status(400).json({
       success: false,
       message: error.message,
     });
   }
 });
 
-// READ: Get expenses belonging to a specific user
+// GET EXPENSES OF A SPECIFIC USER
 app.get("/api/users/:userId/expenses", async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Validate the user ID
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid user ID",
+        message: "Invalid user ID.",
       });
     }
 
-    // Find the user
+    if (userId !== req.user.userId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to access these expenses.",
+      });
+    }
+
     const user = await User.findById(userId);
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found",
+        message: "User not found.",
       });
     }
 
-    // Retrieve expenses linked to this user
     const expenses = await Expense.find({ user: userId })
       .populate("user", "name email")
       .sort({ createdAt: -1 });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      user: user,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+      },
       count: expenses.length,
       data: expenses,
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 });
 
-// READ: Get a single expense by ID
+// GET SINGLE EXPENSE
 app.get("/api/expenses/:id", async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid expense ID",
+        message: "Invalid expense ID.",
       });
     }
 
-    const expense = await Expense.findById(req.params.id)
-      .populate("user", "name email");
+    const expense = await Expense.findOne({
+      _id: req.params.id,
+      user: req.user.userId,
+    }).populate("user", "name email");
 
     if (!expense) {
       return res.status(404).json({
         success: false,
-        message: "Expense not found",
+        message: "Expense not found.",
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data: expense,
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 });
 
-// UPDATE: Update an expense by ID
+// UPDATE EXPENSE
 app.put("/api/expenses/:id", async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid expense ID",
+        message: "Invalid expense ID.",
       });
     }
 
-    const expense = await Expense.findByIdAndUpdate(
-      req.params.id,
-      req.body,
+    const { title, amount, category, date, description } = req.body;
+
+    const expense = await Expense.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        user: req.user.userId,
+      },
+      { title, amount, category, date, description },
       {
         new: true,
         runValidators: true,
@@ -340,64 +360,72 @@ app.put("/api/expenses/:id", async (req, res) => {
     if (!expense) {
       return res.status(404).json({
         success: false,
-        message: "Expense not found",
+        message: "Expense not found.",
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
+      message: "Expense updated successfully.",
       data: expense,
     });
   } catch (error) {
-    res.status(400).json({
+    return res.status(400).json({
       success: false,
       message: error.message,
     });
   }
 });
 
-// DELETE: Delete an expense by ID
+// DELETE EXPENSE
 app.delete("/api/expenses/:id", async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid expense ID",
+        message: "Invalid expense ID.",
       });
     }
 
-    const expense = await Expense.findByIdAndDelete(req.params.id);
+    const expense = await Expense.findOneAndDelete({
+      _id: req.params.id,
+      user: req.user.userId,
+    });
 
     if (!expense) {
       return res.status(404).json({
         success: false,
-        message: "Expense not found",
+        message: "Expense not found.",
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: "Expense deleted successfully",
+      message: "Expense deleted successfully.",
       data: expense,
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 });
 
-// Connect to MongoDB before starting the server
+// CONNECT TO MONGODB AND START SERVER
 mongoose
   .connect(process.env.MONGODB_URI)
   .then(() => {
     console.log("MongoDB connected successfully");
 
     app.listen(process.env.PORT || 5000, () => {
-      console.log(`Server running on port ${process.env.PORT || 5000}`);
+      console.log(
+        `Server running on port ${process.env.PORT || 5000}`
+      );
     });
   })
   .catch((error) => {
     console.error("MongoDB connection failed:", error.message);
   });
+
+  

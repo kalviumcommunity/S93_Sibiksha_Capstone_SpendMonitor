@@ -1,54 +1,110 @@
-import { useEffect, useState } from "react"; 
+
+import { useEffect, useState } from "react";
 
 const API_URL = "http://localhost:5000/api/expenses";
 
-function ExpenseList() {
+function ExpenseList({ onExpensesChange }) {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const [title, setTitle] = useState("");
+  const [amount, setAmount] = useState("");
+  const [category, setCategory] = useState("");
+
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState("");
   const [editAmount, setEditAmount] = useState("");
   const [editCategory, setEditCategory] = useState("");
-  const [saving, setSaving] = useState(false);
 
-  // Fetch expenses from the backend
-  
-useEffect(() => {
-  let ignore = false;
+  // JWT Authorization headers
+  function getAuthHeaders() {
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${localStorage.getItem("token")}`,
+    };
+  }
 
-  async function loadExpenses() {
-    try {
-      setError("");
+  // Fetch expenses from backend
+  useEffect(() => {
+    async function loadExpenses() {
+      try {
+        setError("");
 
-      const response = await fetch(API_URL);
-      const result = await response.json();
+        const response = await fetch(API_URL, {
+          headers: getAuthHeaders(),
+        });
 
-      if (!response.ok || !result.success) {
-        throw new Error(result.message || "Failed to fetch expenses");
-      }
+        const result = await response.json();
 
-      if (!ignore) {
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || "Failed to load expenses");
+        }
+
         setExpenses(result.data);
-      }
-    } catch (err) {
-      if (!ignore) {
-        setError(err.message || "Unable to connect to the server.");
-      }
-    } finally {
-      if (!ignore) {
+        onExpensesChange(result.data);
+      } catch (err) {
+        setError(err.message);
+      } finally {
         setLoading(false);
       }
     }
+
+    loadExpenses();
+  }, []);
+
+  // Add expense
+  async function handleAddExpense(event) {
+    event.preventDefault();
+
+    if (!title.trim() || !amount || !category.trim()) {
+      setError("Please fill in all fields.");
+      return;
+    }
+
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+      setError("Please enter a valid amount.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError("");
+
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          title: title.trim(),
+          amount: Number(amount),
+          category: category.trim(),
+          date: new Date().toISOString(),
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Unable to add expense");
+      }
+
+      const updatedExpenses = [result.data, ...expenses];
+
+      setExpenses(updatedExpenses);
+      onExpensesChange(updatedExpenses);
+
+      setTitle("");
+      setAmount("");
+      setCategory("");
+      setShowForm(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
   }
-
-  loadExpenses();
-
-  return () => {
-    ignore = true;
-  };
-}, []);
-
 
   // Start editing an expense
   function handleEdit(expense) {
@@ -59,14 +115,17 @@ useEffect(() => {
     setError("");
   }
 
-  // Update an expense in the database
+  // Update expense
   async function handleUpdate(id) {
-    if (!editTitle.trim() || !editCategory.trim() || editAmount === "") {
-      setError("Please fill in all required fields.");
+    if (!editTitle.trim() || !editAmount || !editCategory.trim()) {
+      setError("Please fill in all fields.");
       return;
     }
 
-    if (!Number.isFinite(Number(editAmount)) || Number(editAmount) < 0) {
+    if (
+      !Number.isFinite(Number(editAmount)) ||
+      Number(editAmount) <= 0
+    ) {
       setError("Please enter a valid amount.");
       return;
     }
@@ -77,9 +136,7 @@ useEffect(() => {
 
       const response = await fetch(`${API_URL}/${id}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           title: editTitle.trim(),
           amount: Number(editAmount),
@@ -90,24 +147,24 @@ useEffect(() => {
       const result = await response.json();
 
       if (!response.ok || !result.success) {
-        throw new Error(result.message || "Failed to update expense");
+        throw new Error(result.message || "Unable to update expense");
       }
 
-      setExpenses((currentExpenses) =>
-        currentExpenses.map((expense) =>
-          expense._id === id ? result.data : expense
-        )
+      const updatedExpenses = expenses.map((expense) =>
+        expense._id === id ? result.data : expense
       );
 
+      setExpenses(updatedExpenses);
+      onExpensesChange(updatedExpenses);
       setEditingId(null);
     } catch (err) {
-      setError(err.message || "Unable to update expense.");
+      setError(err.message);
     } finally {
       setSaving(false);
     }
   }
 
-  // Delete an expense from the database
+  // Delete expense
   async function handleDelete(id) {
     const confirmed = window.confirm(
       "Are you sure you want to delete this expense?"
@@ -120,38 +177,96 @@ useEffect(() => {
 
       const response = await fetch(`${API_URL}/${id}`, {
         method: "DELETE",
+        headers: getAuthHeaders(),
       });
 
       const result = await response.json();
 
       if (!response.ok || !result.success) {
-        throw new Error(result.message || "Failed to delete expense");
+        throw new Error(result.message || "Unable to delete expense");
       }
 
-      setExpenses((currentExpenses) =>
-        currentExpenses.filter((expense) => expense._id !== id)
+      const updatedExpenses = expenses.filter(
+        (expense) => expense._id !== id
       );
+
+      setExpenses(updatedExpenses);
+      onExpensesChange(updatedExpenses);
 
       if (editingId === id) {
         setEditingId(null);
       }
     } catch (err) {
-      setError(err.message || "Unable to delete expense.");
+      setError(err.message);
     }
   }
 
   if (loading) {
-    return <section className="expense-section">Loading expenses...</section>;
+    return (
+      <section className="expense-section">
+        Loading expenses...
+      </section>
+    );
   }
 
   return (
     <section className="expense-section">
-      <h2>Recent Expenses</h2>
+      <div className="expense-heading">
+        <h2>Recent Expenses</h2>
 
-      {error && <p role="alert">{error}</p>}
+        <button onClick={() => setShowForm(!showForm)}>
+          {showForm ? "Close" : "+ Add Expense"}
+        </button>
+      </div>
+
+      {error && (
+        <p className="error-message" role="alert">
+          {error}
+        </p>
+      )}
+
+      {showForm && (
+        <form className="expense-form" onSubmit={handleAddExpense}>
+          <input
+            type="text"
+            placeholder="Expense title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+          />
+
+          <input
+            type="number"
+            min="0.01"
+            step="0.01"
+            placeholder="Amount (₹)"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            required
+          />
+
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            required
+          >
+            <option value="">Select Category</option>
+            <option value="Food">Food</option>
+            <option value="Travel">Travel</option>
+            <option value="Shopping">Shopping</option>
+            <option value="Bills">Bills</option>
+            <option value="Entertainment">Entertainment</option>
+            <option value="Others">Others</option>
+          </select>
+
+          <button type="submit" disabled={saving}>
+            {saving ? "Adding..." : "Save Expense"}
+          </button>
+        </form>
+      )}
 
       {expenses.length === 0 ? (
-        <p>No expenses available. Add an expense using the backend API first.</p>
+        <p>No expenses added yet. Click Add Expense to get started.</p>
       ) : (
         expenses.map((expense) => (
           <div className="expense-item" key={expense._id}>
@@ -160,26 +275,24 @@ useEffect(() => {
                 <input
                   type="text"
                   value={editTitle}
-                  onChange={(event) => setEditTitle(event.target.value)}
+                  onChange={(e) => setEditTitle(e.target.value)}
                   placeholder="Expense title"
-                  aria-label="Expense title"
                 />
 
                 <input
                   type="number"
-                  min="0"
+                  min="0.01"
+                  step="0.01"
                   value={editAmount}
-                  onChange={(event) => setEditAmount(event.target.value)}
+                  onChange={(e) => setEditAmount(e.target.value)}
                   placeholder="Amount"
-                  aria-label="Expense amount"
                 />
 
                 <input
                   type="text"
                   value={editCategory}
-                  onChange={(event) => setEditCategory(event.target.value)}
+                  onChange={(e) => setEditCategory(e.target.value)}
                   placeholder="Category"
-                  aria-label="Expense category"
                 />
 
                 <button
@@ -199,10 +312,16 @@ useEffect(() => {
             ) : (
               <>
                 <span>{expense.title}</span>
-                <span>₹{expense.amount}</span>
+
+                <span>
+                  ₹{Number(expense.amount).toLocaleString("en-IN")}
+                </span>
+
                 <span>{expense.category}</span>
 
-                <button onClick={() => handleEdit(expense)}>Edit</button>
+                <button onClick={() => handleEdit(expense)}>
+                  Edit
+                </button>
 
                 <button onClick={() => handleDelete(expense._id)}>
                   Delete
@@ -217,3 +336,4 @@ useEffect(() => {
 }
 
 export default ExpenseList;
+
