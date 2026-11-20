@@ -9,6 +9,7 @@ const jwt = require("jsonwebtoken");
 
 const User = require("./models/User.js");
 const Expense = require("./models/Expense.js");
+const Budget = require("./models/Budget.js");
 
 const app = express();
 
@@ -196,9 +197,10 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// Protect all expense routes
+// JWT PROTECTION
 app.use("/api/expenses", authenticateToken);
 app.use("/api/users/:userId/expenses", authenticateToken);
+app.use("/api/budgets", authenticateToken);
 
 // GET ALL EXPENSES OF LOGGED-IN USER
 app.get("/api/expenses", async (req, res) => {
@@ -412,6 +414,163 @@ app.delete("/api/expenses/:id", async (req, res) => {
   }
 });
 
+// GET MONTHLY BUDGET HISTORY
+// Keep this route BEFORE /api/budgets/:month
+app.get("/api/budgets/history", async (req, res) => {
+  try {
+    const [budgets, expenses] = await Promise.all([
+      Budget.find({ user: req.user.userId }).sort({ month: -1 }),
+      Expense.find({ user: req.user.userId }),
+    ]);
+
+    const history = budgets.map((budget) => {
+      const monthlyExpenses = expenses.filter((expense) => {
+        const dateValue = expense.date || expense.createdAt;
+
+        if (!dateValue) return false;
+
+        let expenseMonth;
+
+        if (
+          typeof dateValue === "string" &&
+          /^\d{4}-\d{2}/.test(dateValue)
+        ) {
+          expenseMonth = dateValue.slice(0, 7);
+        } else {
+          const date = new Date(dateValue);
+
+          if (Number.isNaN(date.getTime())) return false;
+
+          expenseMonth = `${date.getFullYear()}-${String(
+            date.getMonth() + 1
+          ).padStart(2, "0")}`;
+        }
+
+        return expenseMonth === budget.month;
+      });
+
+      const totalExpenses = monthlyExpenses.reduce(
+        (total, expense) => total + Number(expense.amount || 0),
+        0
+      );
+
+      const budgetAmount = Number(budget.amount);
+      const remaining = budgetAmount - totalExpenses;
+
+      return {
+        _id: budget._id,
+        month: budget.month,
+        budget: budgetAmount,
+        totalExpenses,
+        remaining,
+        exceededAmount: remaining < 0 ? Math.abs(remaining) : 0,
+        status:
+          remaining < 0
+            ? "Exceeded"
+            : remaining === 0
+              ? "Fully Used"
+              : "Within Budget",
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: history.length,
+      data: history,
+    });
+  } catch (error) {
+    console.error("Budget history error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch budget history.",
+    });
+  }
+});
+
+// GET MONTHLY BUDGET
+app.get("/api/budgets/:month", async (req, res) => {
+  try {
+    const { month } = req.params;
+
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid month format. Use YYYY-MM.",
+      });
+    }
+
+    const budget = await Budget.findOne({
+      user: req.user.userId,
+      month,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: budget,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// CREATE OR UPDATE MONTHLY BUDGET
+app.put("/api/budgets/:month", async (req, res) => {
+  try {
+    const { month } = req.params;
+    const { amount } = req.body;
+
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid month format. Use YYYY-MM.",
+      });
+    }
+
+    if (
+      amount === undefined ||
+      typeof amount !== "number" ||
+      !Number.isFinite(amount) ||
+      amount <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Budget amount must be a positive number.",
+      });
+    }
+
+    const budget = await Budget.findOneAndUpdate(
+      {
+        user: req.user.userId,
+        month,
+      },
+      {
+        $set: { amount },
+      },
+      {
+        new: true,
+        upsert: true,
+        runValidators: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Monthly budget saved successfully.",
+      data: budget,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 // CONNECT TO MONGODB AND START SERVER
 mongoose
   .connect(process.env.MONGODB_URI)
@@ -427,5 +586,3 @@ mongoose
   .catch((error) => {
     console.error("MongoDB connection failed:", error.message);
   });
-
-  
