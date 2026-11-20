@@ -3,14 +3,53 @@ import { useEffect, useState } from "react";
 import ExpenseList from "./components/ExpenseList";
 import "./App.css";
 
-const API_URL = "http://localhost:5000";
+const API_URL = "https://s93-sibiksha-capstone-spendmonitor.onrender.com";
+
+function getCurrentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getExpenseMonth(expense) {
+  const dateValue = expense.date || expense.createdAt;
+
+  if (!dateValue) return "";
+
+  if (typeof dateValue === "string" && /^\d{4}-\d{2}/.test(dateValue)) {
+    return dateValue.slice(0, 7);
+  }
+
+  const date = new Date(dateValue);
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function formatMonth(month) {
+  const [year, monthNumber] = month.split("-");
+  const date = new Date(Number(year), Number(monthNumber) - 1);
+
+  return date.toLocaleDateString("en-IN", {
+    month: "long",
+    year: "numeric",
+  });
+}
 
 function App() {
-  const [page, setPage] = useState("login");
-  const [token, setToken] = useState(localStorage.getItem("token") || "");
-  const [user, setUser] = useState(
-    JSON.parse(localStorage.getItem("user") || "null")
-  );
+  const [page, setPage] = useState(() =>
+  localStorage.getItem("token") ? "dashboard" : "login"
+);
+
+  const [token, setToken] = useState(
+  () => localStorage.getItem("token") || ""
+);
+
+const [user, setUser] = useState(() => {
+  const savedUser = localStorage.getItem("user");
+  return savedUser ? JSON.parse(savedUser) : null;
+});
+
 
   const [form, setForm] = useState({
     name: "",
@@ -22,10 +61,23 @@ function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [expenses, setExpenses] = useState([]);
+  const [showLogoutPopup, setShowLogoutPopup] = useState(false);
 
-  const monthlyBudget = 10000;
+  // Monthly budget states
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
+  const [budget, setBudget] = useState(null);
+  const [budgetInput, setBudgetInput] = useState("");
+  const [budgetLoading, setBudgetLoading] = useState(false);
+  const [budgetSaving, setBudgetSaving] = useState(false);
+  const [budgetMessage, setBudgetMessage] = useState("");
+  const [budgetError, setBudgetError] = useState("");
 
-  // Fetch expenses for Dashboard and Reports
+  // Budget history states
+  const [budgetHistory, setBudgetHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+
+  // Fetch expenses
   useEffect(() => {
     async function fetchExpenses() {
       if (!token) return;
@@ -41,6 +93,15 @@ function App() {
 
         if (response.ok && result.success) {
           setExpenses(result.data);
+        } else if (response.status === 401 || response.status === 403) {
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          setToken("");
+          setUser(null);
+          setExpenses([]);
+          setBudget(null);
+          setBudgetHistory([]);
+          setPage("login");
         }
       } catch (err) {
         console.error("Unable to fetch expenses:", err);
@@ -49,6 +110,82 @@ function App() {
 
     fetchExpenses();
   }, [token]);
+
+  // Fetch budget whenever selected month changes
+  useEffect(() => {
+    async function fetchBudget() {
+      if (!token) return;
+
+      setBudgetLoading(true);
+      setBudgetError("");
+      setBudgetMessage("");
+
+      try {
+        const response = await fetch(
+          `${API_URL}/api/budgets/${selectedMonth}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.message || "Unable to fetch budget.");
+        }
+
+        setBudget(result.data);
+        setBudgetInput(result.data ? String(result.data.amount) : "");
+      } catch (err) {
+        setBudget(null);
+        setBudgetInput("");
+        setBudgetError(err.message);
+      } finally {
+        setBudgetLoading(false);
+      }
+    }
+
+    fetchBudget();
+  }, [token, selectedMonth]);
+
+  // Fetch monthly budget history
+  useEffect(() => {
+    async function fetchBudgetHistory() {
+      if (!token || page !== "history") return;
+
+      setHistoryLoading(true);
+      setHistoryError("");
+
+      try {
+        const response = await fetch(
+          `${API_URL}/api/budgets/history`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+          throw new Error(
+            result.message || "Unable to fetch budget history."
+          );
+        }
+
+        setBudgetHistory(result.data || []);
+      } catch (err) {
+        setHistoryError(err.message);
+      } finally {
+        setHistoryLoading(false);
+      }
+    }
+
+    fetchBudgetHistory();
+  }, [token, page]);
 
   // Login and Register form
   function handleChange(event) {
@@ -121,7 +258,11 @@ function App() {
     setToken("");
     setUser(null);
     setExpenses([]);
+    setBudget(null);
+    setBudgetInput("");
+    setBudgetHistory([]);
     setPage("login");
+    setShowLogoutPopup(false);
 
     setForm({
       name: "",
@@ -131,9 +272,58 @@ function App() {
     });
   }
 
+  function confirmLogout() {
+    handleLogout();
+  }
+
   // Update expenses after Add, Edit or Delete
   function updateExpenses(updatedExpenses) {
     setExpenses(updatedExpenses);
+  }
+
+  // Save monthly budget
+  async function handleSaveBudget(event) {
+    event.preventDefault();
+
+    const amount = Number(budgetInput);
+
+    if (!budgetInput.trim() || !Number.isFinite(amount) || amount <= 0) {
+      setBudgetError("Please enter a valid budget amount greater than zero.");
+      setBudgetMessage("");
+      return;
+    }
+
+    setBudgetSaving(true);
+    setBudgetError("");
+    setBudgetMessage("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/budgets/${selectedMonth}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ amount }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to save budget.");
+      }
+
+      setBudget(result.data);
+      setBudgetInput(String(result.data.amount));
+      setBudgetMessage("Monthly budget saved successfully.");
+    } catch (err) {
+      setBudgetError(err.message);
+    } finally {
+      setBudgetSaving(false);
+    }
   }
 
   // Login and Register pages
@@ -217,15 +407,35 @@ function App() {
     );
   }
 
-  const totalExpenses = expenses.reduce(
+  // Filter expenses for selected month
+  const monthlyExpenses = expenses.filter(
+    (expense) => getExpenseMonth(expense) === selectedMonth
+  );
+
+  const totalExpenses = monthlyExpenses.reduce(
     (total, expense) => total + Number(expense.amount || 0),
     0
   );
 
+  const monthlyBudget = budget ? Number(budget.amount) : 0;
   const remainingBudget = monthlyBudget - totalExpenses;
 
-  // Reports: calculate category-wise spending
-  const categoryTotals = expenses.reduce((totals, expense) => {
+  const budgetPercentage =
+    monthlyBudget > 0 ? (totalExpenses / monthlyBudget) * 100 : 0;
+
+  const progressPercentage = Math.min(budgetPercentage, 100);
+
+  const budgetStatus =
+    monthlyBudget === 0
+      ? "Set a budget to track your spending."
+      : budgetPercentage >= 100
+        ? "You have exceeded your monthly budget!"
+        : budgetPercentage >= 80
+          ? "Warning! You have used 80% or more of your budget."
+          : "Your spending is within the budget.";
+
+  // Reports: category-wise spending
+  const categoryTotals = monthlyExpenses.reduce((totals, expense) => {
     const category = expense.category || "Others";
     totals[category] =
       (totals[category] || 0) + Number(expense.amount || 0);
@@ -237,7 +447,15 @@ function App() {
   return (
     <div className="app-layout">
       <aside className="sidebar">
-        <h1 className="sidebar-logo">SpendMonitor</h1>
+        <button
+  className="sidebar-logo"
+  onClick={() => setPage("profile")}
+  aria-label="Open Profile"
+>
+  <span className="logo-icon">S</span>
+  <span>SpendMonitor</span>
+</button>
+
 
         <p className="sidebar-label">MENU</p>
 
@@ -263,6 +481,13 @@ function App() {
         </button>
 
         <button
+          className={page === "history" ? "nav-link active" : "nav-link"}
+          onClick={() => setPage("history")}
+        >
+          <span>◷</span> Budget History
+        </button>
+
+        <button
           className={page === "profile" ? "nav-link active" : "nav-link"}
           onClick={() => setPage("profile")}
         >
@@ -273,7 +498,10 @@ function App() {
           <p>Logged in as</p>
           <strong>{user?.name || user?.username}</strong>
 
-          <button className="sidebar-logout" onClick={handleLogout}>
+          <button
+            className="sidebar-logout"
+            onClick={() => setShowLogoutPopup(true)}
+          >
             Logout
           </button>
         </div>
@@ -286,6 +514,7 @@ function App() {
               {page === "dashboard" && "Dashboard"}
               {page === "expenses" && "My Expenses"}
               {page === "reports" && "Spending Reports"}
+              {page === "history" && "Budget History"}
               {page === "profile" && "My Profile"}
             </h2>
             <p>Welcome back, {user?.name || user?.username}!</p>
@@ -298,6 +527,7 @@ function App() {
           </div>
         </header>
 
+        {/* DASHBOARD */}
         {page === "dashboard" && (
           <section className="page-content">
             <div className="welcome-banner">
@@ -306,6 +536,110 @@ function App() {
                 <p>Here is your monthly spending overview.</p>
               </div>
               <span className="welcome-icon">₹</span>
+            </div>
+
+            <div className="budget-panel">
+              <div className="budget-heading">
+                <div>
+                  <h3>Monthly Budget Management</h3>
+                  <p>Set and track your monthly spending limit.</p>
+                </div>
+
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(event) => setSelectedMonth(event.target.value)}
+                  aria-label="Select budget month"
+                />
+              </div>
+
+              <form className="budget-form" onSubmit={handleSaveBudget}>
+                <div className="budget-input-group">
+                  <label htmlFor="monthly-budget">Monthly Budget (₹)</label>
+                  <input
+                    id="monthly-budget"
+                    type="number"
+                    min="1"
+                    step="0.01"
+                    placeholder="Enter your monthly budget"
+                    value={budgetInput}
+                    onChange={(event) => setBudgetInput(event.target.value)}
+                    disabled={budgetLoading}
+                    required
+                  />
+                </div>
+
+                <button type="submit" disabled={budgetSaving || budgetLoading}>
+                  {budgetSaving
+                    ? "Saving..."
+                    : budget
+                      ? "Update Budget"
+                      : "Save Budget"}
+                </button>
+              </form>
+
+              {budgetLoading && (
+                <p className="budget-loading">Loading budget...</p>
+              )}
+
+              {budgetMessage && (
+                <p className="budget-success">{budgetMessage}</p>
+              )}
+
+              {budgetError && (
+                <p className="budget-error">{budgetError}</p>
+              )}
+
+              <div className="budget-summary">
+                <div>
+                  <span>Budget</span>
+                  <strong>
+                    ₹{monthlyBudget.toLocaleString("en-IN")}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>Spent</span>
+                  <strong>
+                    ₹{totalExpenses.toLocaleString("en-IN")}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>Remaining</span>
+                  <strong className={remainingBudget < 0 ? "over-budget" : ""}>
+                    ₹{remainingBudget.toLocaleString("en-IN")}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="budget-progress-heading">
+                <span>Budget Usage</span>
+                <strong>{budgetPercentage.toFixed(1)}%</strong>
+              </div>
+
+              <div className="budget-progress-track">
+                <div
+                  className={
+                    budgetPercentage >= 100
+                      ? "budget-progress-fill danger"
+                      : budgetPercentage >= 80
+                        ? "budget-progress-fill warning"
+                        : "budget-progress-fill"
+                  }
+                  style={{ width: `${progressPercentage}%` }}
+                />
+              </div>
+
+              <p
+                className={
+                  budgetPercentage >= 80
+                    ? "budget-status warning-text"
+                    : "budget-status"
+                }
+              >
+                {budgetStatus}
+              </p>
             </div>
 
             <div className="summary-container">
@@ -354,6 +688,7 @@ function App() {
           </section>
         )}
 
+        {/* EXPENSES */}
         {page === "expenses" && (
           <section className="page-content">
             <div className="page-intro">
@@ -365,6 +700,7 @@ function App() {
           </section>
         )}
 
+        {/* REPORTS */}
         {page === "reports" && (
           <section className="page-content">
             <div className="page-intro">
@@ -373,9 +709,9 @@ function App() {
             </div>
 
             <div className="report-total">
-              <p>Total Spending</p>
+              <p>Total Spending - {selectedMonth}</p>
               <h2>₹{totalExpenses.toLocaleString("en-IN")}</h2>
-              <span>{expenses.length} expenses recorded</span>
+              <span>{monthlyExpenses.length} expenses recorded</span>
             </div>
 
             <div className="dashboard-panel">
@@ -414,14 +750,185 @@ function App() {
           </section>
         )}
 
+        {/* BUDGET HISTORY */}
+        {page === "history" && (
+          <section className="page-content">
+            <div className="page-intro">
+              <h2>Monthly Budget History</h2>
+              <p>Track your previous monthly budgets and spending.</p>
+            </div>
+
+            {historyLoading && (
+              <div className="dashboard-panel">
+                <p className="empty-message">Loading budget history...</p>
+              </div>
+            )}
+
+            {historyError && (
+              <div className="dashboard-panel">
+                <p className="budget-error">{historyError}</p>
+                <button
+                  onClick={() => {
+                    setHistoryError("");
+                    setPage("dashboard");
+                    setTimeout(() => setPage("history"), 0);
+                  }}
+                >
+                  Try Again
+                </button>
+              </div>
+            )}
+
+            {!historyLoading && !historyError && budgetHistory.length === 0 && (
+              <div className="dashboard-panel">
+                <p className="empty-message">
+                  No budget history available yet. Save a monthly budget to see
+                  it here.
+                </p>
+                <button onClick={() => setPage("dashboard")}>
+                  Go to Dashboard
+                </button>
+              </div>
+            )}
+
+            {!historyLoading && !historyError && budgetHistory.length > 0 && (
+              <>
+                <div className="history-summary">
+                  <div className="summary-card">
+                    <p>Months Tracked</p>
+                    <h3>{budgetHistory.length}</h3>
+                  </div>
+
+                  <div className="summary-card">
+                    <p>Total Budgets</p>
+                    <h3>
+                      ₹
+                      {budgetHistory
+                        .reduce((sum, item) => sum + Number(item.budget || 0), 0)
+                        .toLocaleString("en-IN")}
+                    </h3>
+                  </div>
+
+                  <div className="summary-card">
+                    <p>Total Expenses</p>
+                    <h3>
+                      ₹
+                      {budgetHistory
+                        .reduce(
+                          (sum, item) => sum + Number(item.totalExpenses || 0),
+                          0
+                        )
+                        .toLocaleString("en-IN")}
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="dashboard-panel history-panel">
+                  <h3>Previous Months</h3>
+
+                  <div className="history-list">
+                    {budgetHistory.map((item) => (
+                      <div className="history-card" key={item._id}>
+                        <div className="history-card-heading">
+                          <h3>{formatMonth(item.month)}</h3>
+
+                          <span
+                            className={`history-status ${
+                              item.status === "Exceeded"
+                                ? "status-exceeded"
+                                : item.status === "Fully Used"
+                                  ? "status-used"
+                                  : "status-within"
+                            }`}
+                          >
+                            {item.status}
+                          </span>
+                        </div>
+
+                        <div className="history-details">
+                          <div>
+                            <span>Monthly Budget</span>
+                            <strong>
+                              ₹{Number(item.budget).toLocaleString("en-IN")}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <span>Total Expenses</span>
+                            <strong>
+                              ₹
+                              {Number(item.totalExpenses).toLocaleString("en-IN")}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <span>Remaining Balance</span>
+                            <strong
+                              className={
+                                item.remaining < 0 ? "over-budget" : ""
+                              }
+                            >
+                              ₹
+                              {Number(item.remaining).toLocaleString("en-IN")}
+                            </strong>
+                          </div>
+
+                          {item.exceededAmount > 0 && (
+                            <div>
+                              <span>Exceeded Amount</span>
+                              <strong className="over-budget">
+                                ₹
+                                {Number(item.exceededAmount).toLocaleString(
+                                  "en-IN"
+                                )}
+                              </strong>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="history-progress-track">
+                          <div
+                            className={`history-progress-fill ${
+                              item.status === "Exceeded"
+                                ? "danger"
+                                : item.totalExpenses / item.budget >= 0.8
+                                  ? "warning"
+                                  : ""
+                            }`}
+                            style={{
+                              width: `${
+                                item.budget > 0
+                                  ? Math.min(
+                                      (item.totalExpenses / item.budget) * 100,
+                                      100
+                                    )
+                                  : 0
+                              }%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
+        {/* PROFILE */}
         {page === "profile" && (
           <section className="page-content">
             <div className="profile-card">
-              <div className="profile-avatar">
-                {(user?.name || user?.username || "U")
-                  .charAt(0)
-                  .toUpperCase()}
-              </div>
+                <button
+                      className="topbar-avatar"
+                      onClick={() => setPage("profile")}
+                      aria-label="Open Profile"
+                    >
+                      {(user?.name || user?.username || "U")
+                        .charAt(0)
+                        .toUpperCase()}
+                    </button>
 
               <h2>{user?.name || "User"}</h2>
               <p className="profile-subtitle">SpendMonitor Account</p>
@@ -443,16 +950,52 @@ function App() {
                 </div>
               </div>
 
-              <button className="profile-logout" onClick={handleLogout}>
+              <button
+                className="profile-logout"
+                onClick={() => setShowLogoutPopup(true)}
+              >
                 Logout
               </button>
             </div>
           </section>
         )}
       </main>
+
+      {/* LOGOUT CONFIRMATION POPUP */}
+      {showLogoutPopup && (
+        <div className="logout-overlay">
+          <div
+            className="logout-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="logout-title"
+          >
+            <div className="logout-icon">!</div>
+
+            <h2 id="logout-title">Confirm Logout</h2>
+
+            <p>Are you sure you want to logout from SpendMonitor?</p>
+
+            <div className="logout-actions">
+              <button
+                className="cancel-logout"
+                onClick={() => setShowLogoutPopup(false)}
+              >
+                Cancel
+              </button>
+
+              <button
+                className="confirm-logout"
+                onClick={confirmLogout}
+              >
+                Yes, Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 export default App;
-

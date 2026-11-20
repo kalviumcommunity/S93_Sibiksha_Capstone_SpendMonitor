@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from "react";
 
-const API_URL = "http://localhost:5000/api/expenses";
+const API_URL = "https://s93-sibiksha-capstone-spendmonitor.onrender.com/api/expenses";
 
 function ExpenseList({ onExpensesChange }) {
   const [expenses, setExpenses] = useState([]);
@@ -288,12 +288,20 @@ function ExpenseList({ onExpensesChange }) {
                   placeholder="Amount"
                 />
 
-                <input
-                  type="text"
+                <select
                   value={editCategory}
                   onChange={(e) => setEditCategory(e.target.value)}
-                  placeholder="Category"
-                />
+                  required
+                >
+                  <option value="">Select Category</option>
+                  <option value="Food">Food</option>
+                  <option value="Travel">Travel</option>
+                  <option value="Shopping">Shopping</option>
+                  <option value="Bills">Bills</option>
+                  <option value="Entertainment">Entertainment</option>
+                  <option value="Others">Others</option>
+                </select>
+
 
                 <button
                   onClick={() => handleUpdate(expense._id)}
